@@ -1,0 +1,299 @@
+/**
+ * styles.css — Discord → WhatsApp Sticker Converter
+ *
+ * Modern dark theme inspired by Discord's design language
+ * with WhatsApp green accents and smooth transitions.
+ */
+
+/* ============================================================
+   Reset & Base
+   ============================================================ */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  min-height: 420px;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+  background: #1e1f22;
+  color: #dbdee1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================
+   Popup Container
+   ============================================================ */
+.popup-container {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 16px;
+}
+
+/* ============================================================
+   Header
+   ============================================================ */
+.popup-header {
+  text-align: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.logo-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.logo-icon {
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 8px rgba(88, 101, 242, 0.3));
+}
+
+.popup-title {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.25;
+  background: linear-gradient(135deg, #5865F2 0%, #25D366 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-align: left;
+}
+
+.popup-subtitle {
+  font-size: 12px;
+  color: #949ba4;
+  margin-top: 4px;
+  letter-spacing: 0.3px;
+}
+
+/* ============================================================
+   Action Buttons
+   ============================================================ */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  letter-spacing: 0.2px;
+}
+
+.btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 100%);
+  pointer-events: none;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-icon {
+  flex-shrink: 0;
+}
+
+/* Primary button — Discord Blurple */
+.btn-primary {
+  background: linear-gradient(135deg, #5865F2 0%, #4752C4 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(88, 101, 242, 0.25);
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #6d78f7 0%, #5865F2 100%);
+  box-shadow: 0 4px 16px rgba(88, 101, 242, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Secondary button — WhatsApp Green */
+.btn-secondary {
+  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(37, 211, 102, 0.2);
+}
+
+.btn-secondary:hover {
+  background: linear-gradient(135deg, #34e876 0%, #25D366 100%);
+  box-shadow: 0 4px 16px rgba(37, 211, 102, 0.35);
+  transform: translateY(-1px);
+}
+
+/* Disabled state */
+.btn.disabled,
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none;
+}
+
+/* ============================================================
+   Progress Section
+   ============================================================ */
+.progress-section {
+  transition: all 0.3s ease;
+}
+
+.progress-section.hidden {
+  display: none;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 6px;
+  background: #2b2d31;
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #5865F2, #25D366);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  position: relative;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.15),
+    transparent
+  );
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #949ba4;
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* ============================================================
+   Status Area
+   ============================================================ */
+.status-area {
+  background: #2b2d31;
+  border-radius: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.status-text {
+  font-size: 12px;
+  line-height: 1.5;
+  transition: color 0.2s ease;
+}
+
+.status-default {
+  color: #949ba4;
+}
+
+.status-info {
+  color: #5865F2;
+}
+
+.status-success {
+  color: #25D366;
+}
+
+.status-error {
+  color: #ED4245;
+}
+
+.status-processing {
+  color: #FEE75C;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+.popup-footer {
+  text-align: center;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.footer-text {
+  font-size: 10px;
+  color: #5c6370;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* ============================================================
+   Scrollbar Styling
+   ============================================================ */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3f4147;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4e5058;
+}
+
+/* ============================================================
+   Animations
+   ============================================================ */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.popup-container {
+  animation: fadeIn 0.2s ease;
+}

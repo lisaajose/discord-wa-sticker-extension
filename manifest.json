@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Discord → WhatsApp Sticker Converter",
+  "version": "1.0.0",
+  "description": "Convert Discord stickers into WhatsApp-compatible WebP stickers. Supports PNG, APNG, and Lottie formats.",
+  "icons": {
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "scripting",
+    "contextMenus",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://discord.com/*",
+    "https://media.discordapp.net/*",
+    "https://cdn.discordapp.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://discord.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Discord Sticker Converter"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["libs/*", "converter.js", "apngHandler.js", "lottieHandler.js", "zipExporter.js"],
+      "matches": ["https://discord.com/*"]
+    }
+  ]
+}
