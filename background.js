@@ -17,10 +17,13 @@ let lastStickerInfo = null;
 // Context Menu Registration
 // ============================================================
 chrome.runtime.onInstalled.addListener(() => {
+  // Register for both 'image' context and 'page' context to maximize visibility.
+  // Discord may override the native context menu, but the extension context menu
+  // items still appear in Chrome's native menu (accessible via Shift+Right-Click).
   chrome.contextMenus.create({
     id: 'convert-sticker',
     title: 'Convert to WhatsApp Sticker',
-    contexts: ['image'],
+    contexts: ['image', 'page', 'frame'],
     documentUrlPatterns: ['https://discord.com/*']
   });
   console.log('[Background] Context menu registered.');
@@ -64,15 +67,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'convertLastSticker':
-      // Popup requests conversion of last detected sticker
+      // Popup or content script requests conversion of last detected sticker
       if (!lastStickerInfo) {
-        sendResponse({ status: 'error', message: 'No sticker detected yet. Right-click a Discord sticker first.' });
+        sendResponse({ status: 'error', message: 'No sticker detected yet. Hover over a sticker and click the green Convert button.' });
         return;
       }
       convertAndDownloadSingle(lastStickerInfo)
         .then(() => sendResponse({ status: 'ok', message: 'Sticker converted and downloaded!' }))
         .catch(err => sendResponse({ status: 'error', message: err.message }));
       return true; // async response
+
+    case 'convertStickerDirect':
+      // Direct conversion with sticker data provided
+      if (!message.data || !message.data.url) {
+        sendResponse({ status: 'error', message: 'No sticker data provided.' });
+        return;
+      }
+      lastStickerInfo = message.data;
+      convertAndDownloadSingle(message.data)
+        .then(() => sendResponse({ status: 'ok', message: 'Sticker converted and downloaded!' }))
+        .catch(err => sendResponse({ status: 'error', message: err.message }));
+      return true;
+
+    case 'scanAndConvert':
+      // Ask content script to find stickers, then convert the latest one
+      scanAndConvertFromTab()
+        .then(result => sendResponse(result))
+        .catch(err => sendResponse({ status: 'error', message: err.message }));
+      return true;
 
     case 'exportStickerPack':
       // Popup requests full pack export
@@ -84,13 +106,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'getLastSticker':
       sendResponse({ data: lastStickerInfo });
       break;
-
-    case 'getStickerPack':
-      // Content script sends the sticker pack data it scraped
-      handleStickerPackData(message.stickers)
-        .then(result => sendResponse(result))
-        .catch(err => sendResponse({ status: 'error', message: err.message }));
-      return true;
 
     default:
       sendResponse({ status: 'unknown' });
@@ -309,6 +324,38 @@ async function convertLottieInOffscreen(lottieData) {
   
   const webpBlob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.9 });
   return webpBlob;
+}
+
+// ============================================================
+// Scan Active Tab and Convert — queries content script first
+// ============================================================
+async function scanAndConvertFromTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs.length || !tabs[0].url?.includes('discord.com')) {
+    return { status: 'error', message: 'No active Discord tab found. Open discord.com first.' };
+  }
+
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabs[0].id, { action: 'scanNow' }, async (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ status: 'error', message: 'Could not reach Discord page. Try reloading the page.' });
+        return;
+      }
+
+      if (!response || !response.data) {
+        resolve({ status: 'error', message: 'No stickers found on the current page. Scroll to see stickers first.' });
+        return;
+      }
+
+      lastStickerInfo = response.data;
+      try {
+        await convertAndDownloadSingle(response.data);
+        resolve({ status: 'ok', message: 'Sticker converted and downloaded!' });
+      } catch (err) {
+        resolve({ status: 'error', message: err.message });
+      }
+    });
+  });
 }
 
 // ============================================================

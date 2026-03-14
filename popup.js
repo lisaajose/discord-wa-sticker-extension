@@ -3,6 +3,10 @@
  *
  * Wires up UI button handlers, communicates with the background service worker,
  * and manages status/progress display.
+ *
+ * NOTE: When the user clicks "Convert Last Sticker", the popup first tries
+ * the cached sticker in the background. If none exists, it asks the content
+ * script to scan the Discord page for stickers as a fallback.
  */
 
 // ============================================================
@@ -24,15 +28,41 @@ let isProcessing = false;
 // Initialize — check for last detected sticker
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-  // Check if there's a last detected sticker
+  // First try background cache
   chrome.runtime.sendMessage({ action: 'getLastSticker' }, (response) => {
     if (response && response.data) {
-      setStatus(`Last sticker: ${response.data.name} (${response.data.format.toUpperCase()})`, 'info');
+      setStatus(`✅ Sticker ready: ${response.data.name} (${response.data.format.toUpperCase()})`, 'info');
     } else {
-      setStatus('Right-click a Discord sticker → "Convert to WhatsApp Sticker"', 'default');
+      // Try scanning the content script
+      queryContentScript();
     }
   });
 });
+
+/**
+ * Query the content script on the active tab for stickers
+ */
+function queryContentScript() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs.length || !tabs[0].url?.includes('discord.com')) {
+      setStatus('Open discord.com and hover over a sticker to convert it.', 'default');
+      return;
+    }
+
+    chrome.tabs.sendMessage(tabs[0].id, { action: 'scanNow' }, (response) => {
+      if (chrome.runtime.lastError) {
+        setStatus('⚠️ Extension not connected. Try reloading the Discord page.', 'error');
+        return;
+      }
+
+      if (response && response.data) {
+        setStatus(`✅ Sticker found: ${response.data.name} (${response.data.format.toUpperCase()})`, 'info');
+      } else {
+        setStatus('Hover over a Discord sticker, then use the green button to convert.', 'default');
+      }
+    });
+  });
+}
 
 // ============================================================
 // Convert Last Sticker Button
@@ -41,18 +71,25 @@ btnConvertLast.addEventListener('click', async () => {
   if (isProcessing) return;
 
   setProcessing(true);
-  setStatus('Converting sticker...', 'processing');
+  setStatus('🔄 Scanning for stickers...', 'processing');
 
   try {
-    const response = await sendMessage({ action: 'convertLastSticker' });
+    // First try the cached sticker
+    let response = await sendMessage({ action: 'convertLastSticker' });
+
+    // If no cached sticker, try scanning the page first
+    if (response.status === 'error' && response.message.includes('No sticker detected')) {
+      setStatus('🔍 Scanning Discord page for stickers...', 'processing');
+      response = await sendMessage({ action: 'scanAndConvert' });
+    }
 
     if (response.status === 'ok') {
-      setStatus(response.message || 'Sticker converted successfully!', 'success');
+      setStatus('✅ ' + (response.message || 'Sticker converted successfully!'), 'success');
     } else {
-      setStatus(response.message || 'No sticker to convert.', 'error');
+      setStatus('❌ ' + (response.message || 'No sticker to convert.'), 'error');
     }
   } catch (err) {
-    setStatus(`Error: ${err.message}`, 'error');
+    setStatus(`❌ Error: ${err.message}`, 'error');
   } finally {
     setProcessing(false);
   }
@@ -66,22 +103,21 @@ btnExportPack.addEventListener('click', async () => {
 
   setProcessing(true);
   showProgress(true);
-  setProgress(0, 'Scanning for stickers...');
+  setProgress(0, 'Scanning Discord page for stickers...');
 
   try {
     const response = await sendMessage({ action: 'exportStickerPack' });
 
     if (response.status === 'ok') {
       setProgress(100, 'Complete!');
-      setStatus(response.message || 'Sticker pack exported!', 'success');
+      setStatus('✅ ' + (response.message || 'Sticker pack exported!'), 'success');
     } else {
-      setStatus(response.message || 'Failed to export sticker pack.', 'error');
+      setStatus('❌ ' + (response.message || 'Failed to export sticker pack.'), 'error');
     }
   } catch (err) {
-    setStatus(`Error: ${err.message}`, 'error');
+    setStatus(`❌ Error: ${err.message}`, 'error');
   } finally {
     setProcessing(false);
-    // Hide progress after a delay
     setTimeout(() => showProgress(false), 3000);
   }
 });
@@ -117,20 +153,11 @@ function sendMessage(message) {
 // UI Helpers
 // ============================================================
 
-/**
- * Set the status text with a specific style
- * @param {string} text - Status message
- * @param {'default'|'info'|'success'|'error'|'processing'} type
- */
 function setStatus(text, type = 'default') {
   statusText.textContent = text;
   statusText.className = `status-text status-${type}`;
 }
 
-/**
- * Toggle processing state (disable/enable buttons)
- * @param {boolean} processing
- */
 function setProcessing(processing) {
   isProcessing = processing;
   btnConvertLast.disabled = processing;
@@ -145,23 +172,10 @@ function setProcessing(processing) {
   }
 }
 
-/**
- * Show/hide the progress section
- * @param {boolean} visible
- */
 function showProgress(visible) {
-  if (visible) {
-    progressSection.classList.remove('hidden');
-  } else {
-    progressSection.classList.add('hidden');
-  }
+  progressSection.classList[visible ? 'remove' : 'add']('hidden');
 }
 
-/**
- * Update the progress bar and text
- * @param {number} percent - 0–100
- * @param {string} text - Progress message
- */
 function setProgress(percent, text) {
   progressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
   progressText.textContent = text;
