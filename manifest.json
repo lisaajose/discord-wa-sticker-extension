@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Discord → WhatsApp Sticker Converter",
-  "version": "1.0.0",
-  "description": "Convert Discord stickers into WhatsApp-compatible WebP stickers. Supports PNG, APNG, and Lottie formats.",
+  "version": "1.1.0",
+  "description": "Convert Discord stickers and custom emojis into WhatsApp-compatible WebP stickers. Supports PNG, APNG, GIF, and Lottie formats.",
   "icons": {
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"

@@ -4,49 +4,68 @@
  * Runs on: https://discord.com/*
  *
  * Responsibilities:
- * - Detect sticker elements in the Discord DOM
- * - Show a floating "Convert" button when hovering over stickers
- * - Capture sticker image URLs
- * - Identify sticker format (PNG/APNG/Lottie)
- * - Send sticker data to the background script
- * - Scrape all visible stickers for pack export
+ * - Detect STICKER and EMOJI elements in the Discord DOM
+ * - Show a floating "Convert" button when hovering over stickers or emojis
+ * - Capture image URLs for both stickers and custom emojis
+ * - Identify format (PNG/APNG/GIF/Lottie)
+ * - Send data to the background script for conversion
+ * - Scrape all visible stickers + emojis for pack export
+ *
+ * Discord CDN patterns:
+ *   Stickers: https://media.discordapp.net/stickers/{id}.png
+ *             https://cdn.discordapp.com/stickers/{id}.png|json
+ *   Emojis:   https://cdn.discordapp.com/emojis/{id}.png|gif|webp
+ *             https://media.discordapp.net/emojis/{id}.png|gif|webp
  *
  * Note: Discord overrides the browser's native right-click context menu
- * with its own custom menu, so Chrome extension context menu items won't
- * appear. We use a floating button overlay instead.
+ * with its own custom menu, so we use a floating button overlay instead.
  */
 
 (() => {
   'use strict';
 
   // ============================================================
-  // Constants — Discord sticker URL patterns
+  // Constants — Discord sticker AND emoji URL patterns
   // ============================================================
+
+  // Matches sticker URLs: /stickers/{id}.{ext}
   const STICKER_URL_REGEX = /(?:media\.discordapp\.net|cdn\.discordapp\.com)\/stickers\/(\d+)\.(png|webp|gif|json)/i;
   const STICKER_CDN_PATTERN = /(?:media\.discordapp\.net|cdn\.discordapp\.com)\/stickers\//i;
 
-  // Broader set of selectors to match Discord's rendered stickers
-  // Discord uses hashed class names that change, so we also match by URL patterns
-  const STICKER_CONTAINER_SELECTORS = [
+  // Matches emoji URLs: /emojis/{id}.{ext}
+  const EMOJI_URL_REGEX = /(?:media\.discordapp\.net|cdn\.discordapp\.com)\/emojis\/(\d+)\.(png|webp|gif)/i;
+  const EMOJI_CDN_PATTERN = /(?:media\.discordapp\.net|cdn\.discordapp\.com)\/emojis\//i;
+
+  // Combined pattern — matches either stickers or emojis
+  const DISCORD_ASSET_PATTERN = /(?:media\.discordapp\.net|cdn\.discordapp\.com)\/(?:stickers|emojis)\//i;
+
+  // Selectors for sticker/emoji containers in Discord's DOM
+  const ASSET_CONTAINER_SELECTORS = [
+    // Sticker selectors
     '[class*="stickerAsset"]',
     '[class*="sticker"] img',
     '[class*="Sticker"] img',
     '[data-type="sticker"]',
     '[class*="stickerContainer"]',
-    '[class*="stickerWrapper"]',
-    'img[class*="clickable"][src*="stickers"]',
-    'img[src*="stickers"]'  // Broadest fallback
+    // Emoji selectors
+    '[class*="emoji"]',
+    'img[class*="emoji"]',
+    'img[data-type="emoji"]',
+    '[class*="emojiContainer"]',
+    // Broad fallbacks
+    'img[src*="stickers"]',
+    'img[src*="emojis"]'
   ];
 
   // ============================================================
   // State
   // ============================================================
-  let lastDetectedSticker = null;
+  let lastDetectedAsset = null;
   let floatingBtn = null;
-  let currentHoveredSticker = null;
+  let currentHoveredAsset = null;
 
   // ============================================================
-  // Floating Convert Button — appears on sticker hover
+  // Floating Convert Button — appears on sticker/emoji hover
   // ============================================================
   function createFloatingButton() {
     if (floatingBtn) return floatingBtn;
@@ -88,26 +107,26 @@
       display: none;
     `;
 
-    // Click handler — convert the sticker
+    // Click handler — convert the sticker/emoji
     floatingBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
 
-      if (currentHoveredSticker) {
-        const stickerInfo = extractStickerInfo(currentHoveredSticker);
-        console.log('[Content] Converting sticker:', stickerInfo);
+      if (currentHoveredAsset) {
+        const assetInfo = extractAssetInfo(currentHoveredAsset);
+        console.log('[Content] Converting:', assetInfo);
 
         // Send to background for conversion
         chrome.runtime.sendMessage({
           action: 'stickerDetected',
-          data: stickerInfo
+          data: assetInfo
         });
 
         chrome.runtime.sendMessage({
           action: 'convertLastSticker'
         }, (response) => {
           if (response && response.status === 'ok') {
-            showToast('✅ Sticker converted & downloading!');
+            showToast('✅ Converted & downloading!');
           } else {
             showToast('❌ ' + (response?.message || 'Conversion failed'));
           }
@@ -125,9 +144,8 @@
     floatingBtn.addEventListener('mouseleave', () => {
       floatingBtn.firstElementChild.style.transform = '';
       floatingBtn.firstElementChild.style.boxShadow = '0 2px 10px rgba(0,0,0,0.3)';
-      // Small delay before hiding to allow click
       setTimeout(() => {
-        if (!floatingBtn.matches(':hover') && !currentHoveredSticker?.matches(':hover')) {
+        if (!floatingBtn.matches(':hover') && !currentHoveredAsset?.matches(':hover')) {
           hideFloatingButton();
         }
       }, 300);
@@ -141,7 +159,7 @@
     const btn = createFloatingButton();
     const rect = element.getBoundingClientRect();
 
-    // Position above the sticker
+    // Position above the element
     btn.style.left = `${rect.left + rect.width / 2}px`;
     btn.style.top = `${rect.top - 10}px`;
     btn.style.transform = 'translate(-50%, -100%)';
@@ -152,7 +170,7 @@
     if (floatingBtn) {
       floatingBtn.style.display = 'none';
     }
-    currentHoveredSticker = null;
+    currentHoveredAsset = null;
   }
 
   // ============================================================
@@ -182,7 +200,6 @@
       animation: waToastIn 0.3s ease;
     `;
 
-    // Add animation keyframes
     if (!document.getElementById('wa-sticker-styles')) {
       const style = document.createElement('style');
       style.id = 'wa-sticker-styles';
@@ -200,33 +217,37 @@
   }
 
   // ============================================================
-  // Sticker Detection — check if an element is a sticker
+  // Asset Detection — check if an element is a sticker OR emoji
   // ============================================================
-  function isStickerElement(element) {
+  function isConvertibleAsset(element) {
     if (!element) return false;
 
-    // Check direct src
+    // Check direct src for sticker or emoji URL
     if (element.tagName === 'IMG' && element.src) {
-      if (STICKER_CDN_PATTERN.test(element.src)) return true;
+      if (DISCORD_ASSET_PATTERN.test(element.src)) return true;
     }
 
-    // Check if it has a sticker URL in srcset
-    if (element.srcset && STICKER_CDN_PATTERN.test(element.srcset)) return true;
+    // Check srcset
+    if (element.srcset && DISCORD_ASSET_PATTERN.test(element.srcset)) return true;
 
-    // Check parent containers for sticker-related class names
+    // Check parent containers for sticker/emoji class names
     let parent = element;
     for (let i = 0; i < 5; i++) {
       if (!parent) break;
       const className = (parent.className || '').toString().toLowerCase();
-      if (className.includes('sticker')) return true;
+      if (className.includes('sticker') || className.includes('emoji')) {
+        // Verify there's actually an img with a Discord CDN URL
+        const img = parent.querySelector('img');
+        if (img && DISCORD_ASSET_PATTERN.test(img.src)) return true;
+      }
       parent = parent.parentElement;
     }
 
-    // Check if child images have sticker URLs
+    // Check child images
     if (element.tagName !== 'IMG') {
       const imgs = element.querySelectorAll('img');
       for (const img of imgs) {
-        if (STICKER_CDN_PATTERN.test(img.src)) return true;
+        if (DISCORD_ASSET_PATTERN.test(img.src)) return true;
       }
     }
 
@@ -234,24 +255,23 @@
   }
 
   /**
-   * Find the sticker image element from a target element
-   * (the target might be a wrapper, not the img itself)
+   * Find the asset image element from a target element
    */
-  function findStickerImage(element) {
-    // If it's an img with sticker URL, return directly
-    if (element.tagName === 'IMG' && STICKER_CDN_PATTERN.test(element.src)) {
+  function findAssetImage(element) {
+    // Direct img with sticker/emoji URL
+    if (element.tagName === 'IMG' && DISCORD_ASSET_PATTERN.test(element.src)) {
       return element;
     }
 
-    // Search children for sticker img
-    const img = element.querySelector('img[src*="stickers"]');
+    // Search children
+    const img = element.querySelector('img[src*="stickers"], img[src*="emojis"]');
     if (img) return img;
 
-    // Search siblings/parents
+    // Search parents
     let parent = element.parentElement;
     for (let i = 0; i < 5; i++) {
       if (!parent) break;
-      const img = parent.querySelector('img[src*="stickers"]');
+      const img = parent.querySelector('img[src*="stickers"], img[src*="emojis"]');
       if (img) return img;
       parent = parent.parentElement;
     }
@@ -260,77 +280,94 @@
   }
 
   // ============================================================
-  // Extract sticker info from an element
+  // Extract asset info (works for both stickers and emojis)
   // ============================================================
-  function extractStickerInfo(element) {
-    const imgEl = (element.tagName === 'IMG') ? element : findStickerImage(element);
+  function extractAssetInfo(element) {
+    const imgEl = (element.tagName === 'IMG') ? element : findAssetImage(element);
     const url = imgEl?.src || '';
 
     const info = {
       url: url,
       id: null,
+      type: 'unknown', // 'sticker' or 'emoji'
       format: 'png',
-      name: 'sticker',
+      name: 'asset',
       width: imgEl?.naturalWidth || imgEl?.width || 0,
       height: imgEl?.naturalHeight || imgEl?.height || 0
     };
 
-    // Parse the URL
-    const match = url.match(STICKER_URL_REGEX);
+    // Try sticker URL first
+    let match = url.match(STICKER_URL_REGEX);
     if (match) {
       info.id = match[1];
+      info.type = 'sticker';
       const ext = match[2].toLowerCase();
       info.format = (ext === 'json') ? 'lottie' : ext;
+    } else {
+      // Try emoji URL
+      match = url.match(EMOJI_URL_REGEX);
+      if (match) {
+        info.id = match[1];
+        info.type = 'emoji';
+        info.format = match[2].toLowerCase();
+      }
     }
 
-    // Get sticker name from alt text or aria-label
+    // Get name from alt text or aria-label
     const altText = imgEl?.alt || imgEl?.getAttribute('aria-label') || '';
     if (altText && altText.trim()) {
-      info.name = altText.trim().replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_');
+      // Discord emoji alt text is usually like ":emoji_name:" — strip colons
+      let cleanName = altText.trim().replace(/^:+|:+$/g, '');
+      cleanName = cleanName.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_');
+      if (cleanName) info.name = cleanName;
     }
 
     // Fallback name
-    if (!info.name || info.name === 'sticker') {
-      info.name = `sticker_${info.id || Date.now()}`;
+    if (info.name === 'asset' || !info.name) {
+      info.name = `${info.type}_${info.id || Date.now()}`;
     }
 
-    // Clean the URL — remove size constraints, get full resolution
+    // Build clean full-resolution URL
     if (info.id) {
-      info.url = `https://media.discordapp.net/stickers/${info.id}.png?size=512`;
+      if (info.type === 'sticker') {
+        info.url = `https://media.discordapp.net/stickers/${info.id}.png?size=512`;
+      } else if (info.type === 'emoji') {
+        // For emojis, use the original format but request large size
+        // GIF emojis are animated, PNG are static
+        const ext = info.format === 'gif' ? 'gif' : 'png';
+        info.url = `https://cdn.discordapp.com/emojis/${info.id}.${ext}?size=512&quality=lossless`;
+      }
     }
 
     return info;
   }
 
   // ============================================================
-  // Event Delegation — detect sticker hovers globally
+  // Event Delegation — detect sticker/emoji hovers
   // ============================================================
   document.addEventListener('mouseover', (e) => {
     const target = e.target;
 
-    // Check if we're hovering over a sticker or a sticker container
-    if (isStickerElement(target)) {
-      const stickerImg = findStickerImage(target) || target;
-      currentHoveredSticker = stickerImg;
-      showFloatingButton(stickerImg);
+    if (isConvertibleAsset(target)) {
+      const assetImg = findAssetImage(target) || target;
+      currentHoveredAsset = assetImg;
+      showFloatingButton(assetImg);
     }
   }, true);
 
   document.addEventListener('mouseout', (e) => {
-    const target = e.target;
     const relatedTarget = e.relatedTarget;
 
-    // Don't hide if moving to the floating button itself
+    // Don't hide if moving to the floating button
     if (floatingBtn && (floatingBtn.contains(relatedTarget) || floatingBtn === relatedTarget)) {
       return;
     }
 
-    // Don't hide if still within the same sticker area
-    if (relatedTarget && isStickerElement(relatedTarget)) {
+    // Don't hide if still within a convertible asset
+    if (relatedTarget && isConvertibleAsset(relatedTarget)) {
       return;
     }
 
-    // Hide with a small delay to allow moving to the button
     setTimeout(() => {
       if (floatingBtn && !floatingBtn.matches(':hover')) {
         hideFloatingButton();
@@ -339,45 +376,40 @@
   }, true);
 
   // ============================================================
-  // Right-click handler — intercept right-clicks on stickers
-  // and send sticker info even if Discord blocks native menu
+  // Right-click handler — send asset info to background
   // ============================================================
   document.addEventListener('contextmenu', (e) => {
     const target = e.target;
 
-    if (isStickerElement(target) || (target.tagName === 'IMG' && STICKER_CDN_PATTERN.test(target.src))) {
-      const stickerImg = findStickerImage(target) || target;
-      const stickerInfo = extractStickerInfo(stickerImg);
-      lastDetectedSticker = stickerInfo;
+    if (isConvertibleAsset(target) || (target.tagName === 'IMG' && DISCORD_ASSET_PATTERN.test(target.src))) {
+      const assetImg = findAssetImage(target) || target;
+      const assetInfo = extractAssetInfo(assetImg);
+      lastDetectedAsset = assetInfo;
 
-      // Notify background script
       chrome.runtime.sendMessage({
         action: 'stickerDetected',
-        data: stickerInfo
+        data: assetInfo
       });
 
-      console.log('[Content] Sticker detected on right-click:', stickerInfo);
+      console.log(`[Content] ${assetInfo.type} detected on right-click:`, assetInfo);
     }
   }, true);
 
   // ============================================================
-  // Periodic Scanner — scan for new stickers every few seconds
-  // This catches stickers that MutationObserver might miss
+  // Periodic Scanner — scan for new stickers AND emojis
   // ============================================================
-  function scanForStickers() {
+  function scanForAssets() {
     const allImages = document.querySelectorAll('img');
     let count = 0;
 
     allImages.forEach(img => {
-      if (STICKER_CDN_PATTERN.test(img.src) && !img.dataset.waConverterTracked) {
+      if (DISCORD_ASSET_PATTERN.test(img.src) && !img.dataset.waConverterTracked) {
         img.dataset.waConverterTracked = 'true';
         count++;
 
-        // Store the most recent sticker
-        const info = extractStickerInfo(img);
-        lastDetectedSticker = info;
+        const info = extractAssetInfo(img);
+        lastDetectedAsset = info;
 
-        // Notify background
         chrome.runtime.sendMessage({
           action: 'stickerDetected',
           data: info
@@ -386,12 +418,12 @@
     });
 
     if (count > 0) {
-      console.log(`[Content] Found ${count} new stickers.`);
+      console.log(`[Content] Found ${count} new stickers/emojis.`);
     }
   }
 
   // ============================================================
-  // MutationObserver — detect dynamically loaded stickers
+  // MutationObserver — detect dynamically loaded content
   // ============================================================
   const observer = new MutationObserver((mutations) => {
     let hasNewNodes = false;
@@ -402,13 +434,11 @@
       }
     }
     if (hasNewNodes) {
-      // Debounce scanning
       clearTimeout(observer._scanTimeout);
-      observer._scanTimeout = setTimeout(scanForStickers, 500);
+      observer._scanTimeout = setTimeout(scanForAssets, 500);
     }
   });
 
-  // Start observing once the page is ready
   function startObserving() {
     const chatContainer = document.querySelector('[class*="chat"]') || document.body;
     observer.observe(chatContainer, {
@@ -424,23 +454,20 @@
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.action) {
       case 'scrapeStickers': {
-        const stickers = scrapeAllStickers();
-        sendResponse({ stickers });
+        const assets = scrapeAllAssets();
+        sendResponse({ stickers: assets }); // keep key name for back-compat
         break;
       }
 
       case 'getLastSticker': {
-        // If no sticker cached, try scanning  
-        if (!lastDetectedSticker) {
-          scanForStickers();
-        }
-        sendResponse({ data: lastDetectedSticker });
+        if (!lastDetectedAsset) scanForAssets();
+        sendResponse({ data: lastDetectedAsset });
         break;
       }
 
       case 'scanNow': {
-        scanForStickers();
-        sendResponse({ data: lastDetectedSticker, status: 'ok' });
+        scanForAssets();
+        sendResponse({ data: lastDetectedAsset, status: 'ok' });
         break;
       }
 
@@ -455,30 +482,30 @@
   });
 
   // ============================================================
-  // Scrape All Stickers — for full pack export
+  // Scrape All Assets — stickers + emojis for pack export
   // ============================================================
-  function scrapeAllStickers() {
-    const stickerSet = new Map();
+  function scrapeAllAssets() {
+    const assetSet = new Map();
 
-    // Method 1: Find all images with sticker URLs
+    // Find all images with sticker OR emoji URLs
     document.querySelectorAll('img').forEach(img => {
-      if (STICKER_CDN_PATTERN.test(img.src)) {
-        const info = extractStickerInfo(img);
-        if (info.id && !stickerSet.has(info.id)) {
-          stickerSet.set(info.id, info);
+      if (DISCORD_ASSET_PATTERN.test(img.src)) {
+        const info = extractAssetInfo(img);
+        if (info.id && !assetSet.has(info.id)) {
+          assetSet.set(info.id, info);
         }
       }
     });
 
-    // Method 2: Search using container selectors
-    STICKER_CONTAINER_SELECTORS.forEach(selector => {
+    // Also search using container selectors
+    ASSET_CONTAINER_SELECTORS.forEach(selector => {
       try {
         document.querySelectorAll(selector).forEach(el => {
           const img = (el.tagName === 'IMG') ? el : el.querySelector('img');
-          if (img && STICKER_CDN_PATTERN.test(img.src)) {
-            const info = extractStickerInfo(img);
-            if (info.id && !stickerSet.has(info.id)) {
-              stickerSet.set(info.id, info);
+          if (img && DISCORD_ASSET_PATTERN.test(img.src)) {
+            const info = extractAssetInfo(img);
+            if (info.id && !assetSet.has(info.id)) {
+              assetSet.set(info.id, info);
             }
           }
         });
@@ -487,21 +514,19 @@
       }
     });
 
-    const stickers = Array.from(stickerSet.values());
-    console.log(`[Content] Scraped ${stickers.length} unique stickers.`);
-    return stickers;
+    const assets = Array.from(assetSet.values());
+    console.log(`[Content] Scraped ${assets.length} unique stickers/emojis.`);
+    return assets;
   }
 
   // ============================================================
   // Initialize
   // ============================================================
   function init() {
-    console.log('[Content] Discord → WhatsApp Sticker Converter loaded.');
-    scanForStickers();
+    console.log('[Content] Discord → WhatsApp Sticker/Emoji Converter loaded.');
+    scanForAssets();
     startObserving();
-
-    // Periodic re-scan every 5 seconds
-    setInterval(scanForStickers, 5000);
+    setInterval(scanForAssets, 5000);
   }
 
   if (document.readyState === 'loading') {

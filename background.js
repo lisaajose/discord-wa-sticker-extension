@@ -113,25 +113,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ============================================================
-// URL Parser — extract sticker info from Discord CDN URLs
+// URL Parser — extract sticker/emoji info from Discord CDN URLs
 // ============================================================
 function parseStickerUrl(url) {
   const info = {
     url: url,
     id: null,
-    format: 'png', // default
-    name: 'sticker'
+    type: 'unknown', // 'sticker' or 'emoji'
+    format: 'png',
+    name: 'asset'
   };
 
-  // Discord sticker URLs:
-  // https://media.discordapp.net/stickers/{id}.png
-  // https://cdn.discordapp.com/stickers/{id}.png
-  // https://cdn.discordapp.com/stickers/{id}.json (Lottie)
-  // Can also have ?size=... or ?passthrough=... query params
+  // Discord CDN URL patterns:
+  // Stickers: https://media.discordapp.net/stickers/{id}.png|json
+  //           https://cdn.discordapp.com/stickers/{id}.png|json
+  // Emojis:   https://cdn.discordapp.com/emojis/{id}.png|gif|webp
+  //           https://media.discordapp.net/emojis/{id}.png|gif|webp
   try {
     const parsed = new URL(url);
     const pathParts = parsed.pathname.split('/');
     const filename = pathParts[pathParts.length - 1];
+    const isEmoji = parsed.pathname.includes('/emojis/');
+    const isSticker = parsed.pathname.includes('/stickers/');
 
     // Extract ID and extension
     const match = filename.match(/^(\d+)\.(png|json|gif|webp)/i);
@@ -140,15 +143,28 @@ function parseStickerUrl(url) {
       const ext = match[2].toLowerCase();
       if (ext === 'json') {
         info.format = 'lottie';
-      } else if (ext === 'png') {
-        // Could be APNG — we'll detect during download
-        info.format = 'png';
       } else {
         info.format = ext;
       }
     }
 
-    info.name = `sticker_${info.id || Date.now()}`;
+    if (isEmoji) {
+      info.type = 'emoji';
+      info.name = `emoji_${info.id || Date.now()}`;
+      // Build full-res URL for emoji
+      if (info.id) {
+        const ext = info.format === 'gif' ? 'gif' : 'png';
+        info.url = `https://cdn.discordapp.com/emojis/${info.id}.${ext}?size=512&quality=lossless`;
+      }
+    } else if (isSticker) {
+      info.type = 'sticker';
+      info.name = `sticker_${info.id || Date.now()}`;
+      if (info.id) {
+        info.url = `https://media.discordapp.net/stickers/${info.id}.png?size=512`;
+      }
+    } else {
+      info.name = `asset_${info.id || Date.now()}`;
+    }
   } catch (e) {
     console.warn('[Background] Could not parse URL:', url);
   }
